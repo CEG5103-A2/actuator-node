@@ -12,6 +12,7 @@
 #include <PubSubClient.h>
 #include <Adafruit_NeoPixel.h>
 
+
 #include "secrets.h"
 #include "actuation_node_1_mqtt_secrets.h"
 
@@ -27,6 +28,11 @@ const char thingspeak_pass[] = SECRET_MQTT_PASSWORD;
 
 const int MQTT_RETRY_DELAY_S = 1;
 const int MQTT_ENC = 1883; //TCP, no encryption https://www.mathworks.com/help/thingspeak/mqtt-basics.html 
+
+const int vibration_motor_pin = GPIO_NUM_25; //Analog pin, higher means higher motor strength
+
+const uint8_t min_vibration = 100; //Leave it on as a warning
+const uint8_t min_neopixel_brightness = 5;
 
 enum SensorFields{
     Voltage = 1,
@@ -61,6 +67,8 @@ void thingspeak_callback(char* topic, byte* message, unsigned int length);
 void show_cross(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b);
 void show_tick(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b);
 
+void power_vibration_motor(uint8_t strength);
+
 struct Label_Received g_label_received;
 
 uint32_t last_pub_time = millis();
@@ -76,6 +84,9 @@ void setup() {
     pixels.clear();
     pixels.setBrightness(255);
     pixels.show();
+
+    pinMode(vibration_motor_pin, OUTPUT);
+    power_vibration_motor(0);
 
     connectWifi();
 
@@ -95,6 +106,7 @@ void loop() {
     mqttClient.loop();
 
     uint8_t brightness;
+    uint8_t motor_strength;
 
     #ifdef PUBLISH_TO_TEST_FIELD
     if(millis() - last_pub_time >= 2000)
@@ -112,15 +124,24 @@ void loop() {
     uint32_t recency = millis() - g_label_received.timestamp;
     if(recency < 1000)
     {
-        // More recent = brighter
-        brightness =255 - map(recency, 0, 1000, 0, 250); // From 5 to 255
+        recency = 1000 - recency; // Recency higher -> event happened more recently
+        brightness = 255 - map(recency,
+            0, 1000,
+            min_neopixel_brightness, 255);
+        
+        motor_strength = 255 - map(recency,
+            0, 1000,
+            min_vibration, 255);
+
         if(g_label_received.label == ML_Label::FAILURE)
         {
             show_cross(brightness, 255, 0, 0); //Red cross
+            power_vibration_motor(motor_strength);
         }
         else //(g_label_received.label == ML_Label::NORMAL)
         {
             show_tick(brightness, 0, 255, 0); ///Green Tick
+            power_vibration_motor(false);
         }
     }
     else
@@ -128,14 +149,15 @@ void loop() {
         //Brightness if no callback called for 1000ms or more
         //allows the viewer to see last state, and also know it might be "stale"
 
-        brightness = 5; 
         if(g_label_received.label == ML_Label::FAILURE)
         {
-            show_cross(brightness, 255, 0, 0); //Red cross
+            show_cross(min_neopixel_brightness, 255, 0, 0); //Red cross
+            power_vibration_motor(min_vibration);
         }
         else //(g_label_received.label == ML_Label::NORMAL)
         {
-            show_tick(brightness, 0, 255, 0); ///Green Tick
+            show_tick(min_neopixel_brightness, 0, 255, 0); ///Green Tick
+            power_vibration_motor(false);
         }
     }
 
@@ -319,4 +341,9 @@ void show_cross(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b)
     {
         pixels.setPixelColor(cross_idxs[idx], pixels.Color(r, g, b));
     }
+}
+
+void power_vibration_motor(uint8_t strength)
+{
+    analogWrite(vibration_motor_pin, strength);
 }
