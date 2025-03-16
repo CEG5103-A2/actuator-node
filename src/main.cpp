@@ -15,6 +15,9 @@
 #include "secrets.h"
 #include "actuation_node_1_mqtt_secrets.h"
 
+#define SUBSCRIBE_TEST_FIELD_6 // else subscribe to label field 5 (LABEL)
+#define PUBLISH_TO_TEST_FIELD  // for testing callback
+
 // Defined in "secrets.h" and "mqtt secrets"
 const char wifi_ssid[] = WIFI_SSID;
 const char wifi_password[] = WIFI_PASSWORD;
@@ -55,6 +58,9 @@ bool thingspeak_subscribe(SensorFields sensor);
 bool thingspeak_publish(SensorFields sensor, int value);
 void thingspeak_callback(char* topic, byte* message, unsigned int length);
 
+void show_cross(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b);
+void show_tick(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b);
+
 struct Label_Received g_label_received;
 
 uint32_t last_pub_time = millis();
@@ -88,26 +94,49 @@ void loop() {
     mqttConnect();
     mqttClient.loop();
 
-    if(millis() - last_pub_time >= 1000)
+    uint8_t brightness;
+
+    #ifdef PUBLISH_TO_TEST_FIELD
+    if(millis() - last_pub_time >= 2000)
     {
         thingspeak_publish(SensorFields::TestField, last_pub);
         last_pub = !last_pub; //Swtich it up every 1s
         last_pub_time = millis();
     }
+    #endif //PUBLISH_TO_TEST_FIELD
 
-    if(g_label_received.label == ML_Label::FAILURE)
+    //Neopixel LEDs give an idea of recency of when the payload from the topic was recieved
+    //after subscribing to it
+    pixels.clear();
+
+    uint32_t recency = millis() - g_label_received.timestamp;
+    if(recency < 1000)
     {
-        pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+        // More recent = brighter
+        brightness =255 - map(recency, 0, 1000, 0, 250); // From 5 to 255
+        if(g_label_received.label == ML_Label::FAILURE)
+        {
+            show_cross(brightness, 255, 0, 0); //Red cross
+        }
+        else //(g_label_received.label == ML_Label::NORMAL)
+        {
+            show_tick(brightness, 0, 255, 0); ///Green Tick
+        }
     }
     else
     {
-        pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-    }
+        //Brightness if no callback called for 1000ms or more
+        //allows the viewer to see last state, and also know it might be "stale"
 
-    //Show recency, turn off indicator if no recv after 1s
-    if(millis() - g_label_received.timestamp>=1000)
-    {
-        pixels.setPixelColor(0, pixels.Color(0, 0, 0));
+        brightness = 5; 
+        if(g_label_received.label == ML_Label::FAILURE)
+        {
+            show_cross(brightness, 255, 0, 0); //Red cross
+        }
+        else //(g_label_received.label == ML_Label::NORMAL)
+        {
+            show_tick(brightness, 0, 255, 0); ///Green Tick
+        }
     }
 
     pixels.show();
@@ -134,6 +163,8 @@ void connectWifi()
     }
 }
 
+// MQTT / thingspeak
+
 /**
  * @brief Connect to MQTT server.
  * 
@@ -145,7 +176,11 @@ void mqttConnect() {
         if (mqttClient.connect(thingspeak_client, thingspeak_user, thingspeak_pass)) 
         {
             Serial.println("MQTT successful." );
+            #ifdef SUBSCRIBE_TEST_FIELD_6
             thingspeak_subscribe(SensorFields::TestField);
+            #else //SUBSCRIBE_TEST_FIELD_6 not defined, subscribe to LABEL field
+            thingspeak_subscribe(SensorFields::Label);
+            #endif
         }
         else {
             Serial.print("MQTT connection failed, rc = " );
@@ -193,8 +228,11 @@ bool thingspeak_publish(SensorFields sensor, int value)
 void thingspeak_callback(char* topic, byte* message, unsigned int length) {
     // Serial.print("Message arrived on topic: ");
     // Serial.println(topic);
+
+    const char  test_field_topic[] = "channels/2868666/subscribe/fields/field6";
+    const char label_field_topic[] = "channels/2868666/subscribe/fields/field5";
     
-    if(String(topic) == "channels/2868666/subscribe/fields/field6")
+    if( (String(topic) == test_field_topic) || (String(topic) == label_field_topic) )
     {
         if((message[0] == '1') && (length == 1))      g_label_received.label = ML_Label::FAILURE;
         else if((message[0] == '0') && (length == 1)) g_label_received.label = ML_Label::NORMAL;
@@ -236,4 +274,49 @@ bool thingspeak_subscribe(SensorFields sensor)
     Serial.println(subscribe_topic);
 
     return mqttClient.subscribe(subscribe_topic);
+}
+
+
+// Neopxiel Patterns
+
+/**
+ * @brief Need to call show after this. All params are uint8_t, 0 - 255
+ * 
+ * @param brightness 
+ * @param r 
+ * @param g 
+ * @param b 
+ */
+void show_tick(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b)
+{
+    static uint8_t tick_idxs[] = {9, 13, 15, 17, 21};
+    static uint8_t length = sizeof(tick_idxs) / sizeof(tick_idxs[0]);
+
+    pixels.setBrightness(brightness);
+    
+    for(int idx = 0; idx < length; idx++)
+    {
+        pixels.setPixelColor(tick_idxs[idx], pixels.Color(r, g, b));
+    }
+}
+
+/**
+ * @brief Need to call show after this. All params are uint8_t, 0 - 255
+ * 
+ * @param brightness 
+ * @param r 
+ * @param g 
+ * @param b 
+ */
+void show_cross(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b)
+{
+    static uint8_t cross_idxs[] = {0, 4, 6, 8, 12, 16, 18, 20, 24};
+    static uint8_t length = sizeof(cross_idxs) / sizeof(cross_idxs[0]);
+
+    pixels.setBrightness(brightness);
+    
+    for(int idx = 0; idx < length; idx++)
+    {
+        pixels.setPixelColor(cross_idxs[idx], pixels.Color(r, g, b));
+    }
 }
