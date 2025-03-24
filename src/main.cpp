@@ -17,7 +17,9 @@
 #include "actuation_node_1_mqtt_secrets.h"
 
 #define SUBSCRIBE_TEST_FIELD_6 // else subscribe to label field 5 (LABEL)
-#define PUBLISH_TO_TEST_FIELD  // for testing callback
+//#define PUBLISH_TO_TEST_FIELD  // for testing callback
+
+const int CHANNEL_ID = 2887865;
 
 // Defined in "secrets.h" and "mqtt secrets"
 const char wifi_ssid[] = WIFI_SSID;
@@ -35,7 +37,8 @@ const uint8_t min_vibration = 100; //Leave it on as a warning
 const uint8_t min_neopixel_brightness = 5;
 
 enum SensorFields{
-    Voltage = 1,
+    ML_Prediction = 1,
+    //Voltage = 1,
     Rotation = 2,
     Pressure = 3,
     Vibration = 4,
@@ -199,7 +202,7 @@ void mqttConnect() {
         {
             Serial.println("MQTT successful." );
             #ifdef SUBSCRIBE_TEST_FIELD_6
-            thingspeak_subscribe(SensorFields::TestField);
+            thingspeak_subscribe(SensorFields::ML_Prediction);
             #else //SUBSCRIBE_TEST_FIELD_6 not defined, subscribe to LABEL field
             thingspeak_subscribe(SensorFields::Label);
             #endif
@@ -252,7 +255,12 @@ void thingspeak_callback(char* topic, byte* message, unsigned int length) {
     // Serial.println(topic);
 
     const char  test_field_topic[] = "channels/2868666/subscribe/fields/field6";
-    const char label_field_topic[] = "channels/2868666/subscribe/fields/field5";
+
+    static char label_field_topic[100];
+    snprintf(label_field_topic, sizeof(label_field_topic),
+        "channels/%i/subscribe/fields/field%i",
+        CHANNEL_ID,
+        SensorFields::ML_Prediction);
     
     if( (String(topic) == test_field_topic) || (String(topic) == label_field_topic) )
     {
@@ -290,7 +298,8 @@ bool thingspeak_subscribe(SensorFields sensor)
 
     //2868666 is the channel ID
     snprintf(subscribe_topic, sizeof(subscribe_topic),
-        "channels/2868666/subscribe/fields/field%i",
+        "channels/%i/subscribe/fields/field%i",
+        CHANNEL_ID,
         sensor);
 
     Serial.println(subscribe_topic);
